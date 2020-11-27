@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Security.Authentication;
 using System.Text;
 using System.Threading;
@@ -17,6 +18,8 @@ namespace Unity.RenderStreaming.Signaling
         private Thread m_signalingThread;
         private AutoResetEvent m_wsCloseEvent;
         private WebSocket m_webSocket;
+
+        private Dictionary<string, string> map = new Dictionary<string, string>();
 
         public WebSocketSignaling(string url, float timeout, SynchronizationContext mainThreadContext)
         {
@@ -62,6 +65,7 @@ namespace Unity.RenderStreaming.Signaling
 
             RoutedMessage<DescData> routedMessage = new RoutedMessage<DescData>();
             routedMessage.from = connectionId;
+            routedMessage.to = connectionId;
             routedMessage.data = data;
             routedMessage.type = "offer";
 
@@ -71,12 +75,13 @@ namespace Unity.RenderStreaming.Signaling
         public void SendAnswer(string connectionId, RTCSessionDescription answer)
         {
             DescData data = new DescData();
-            data.connectionId = connectionId;
+            data.connectionId = map[connectionId];
             data.sdp = answer.sdp;
             data.type = "answer";
 
             RoutedMessage<DescData> routedMessage = new RoutedMessage<DescData>();
             routedMessage.from = connectionId;
+            routedMessage.to = map[connectionId];
             routedMessage.data = data;
             routedMessage.type = "answer";
 
@@ -93,15 +98,20 @@ namespace Unity.RenderStreaming.Signaling
 
             RoutedMessage<CandidateData> routedMessage = new RoutedMessage<CandidateData>();
             routedMessage.from = connectionId;
+            routedMessage.to = map[connectionId];
             routedMessage.data = data;
             routedMessage.type = "candidate";
 
             WSSend(routedMessage);
         }
 
-        public void CreateConnection()
+        public void CreateConnection(string connectionId)
         {
-            this.WSSend("{\"type\":\"connect\"}");
+            RoutedMessage<string> routedMessage = new RoutedMessage<string>();
+            routedMessage.@from = connectionId;
+            routedMessage.to = connectionId;
+            routedMessage.type = "connect";
+            this.WSSend(routedMessage);
         }
 
         private void WSManage()
@@ -161,30 +171,34 @@ namespace Unity.RenderStreaming.Signaling
                 {
                     if (routedMessage.type == "connect")
                     {
-                        string connectionId = JsonUtility.FromJson<SignalingMessage>(content).connectionId;
+                        string connectionId = routedMessage.to;
                         m_mainThreadContext.Post(d => OnCreateConnection?.Invoke(this, connectionId), null);
                     }
                     else if (routedMessage.type == "offer")
                     {
-                        DescData offer = new DescData();
-                        offer.connectionId = routedMessage.from;
-                        offer.sdp = msg.sdp;
+                        DescData offer = new DescData
+                        {
+                            connectionId = string.IsNullOrEmpty(routedMessage.to) ? Guid.NewGuid().ToString() : routedMessage.to,
+                            sdp = msg.sdp
+                        };
+                        map[offer.connectionId] = routedMessage.@from;
                         m_mainThreadContext.Post(d => OnOffer?.Invoke(this, offer), null);
                     }
                     else if (routedMessage.type == "answer")
                     {
                         DescData answer = new DescData
                         {
-                            connectionId = routedMessage.from,
+                            connectionId = routedMessage.to,
                             sdp = msg.sdp
                         };
+                        map[answer.connectionId] = routedMessage.@from;
                         m_mainThreadContext.Post(d => OnAnswer?.Invoke(this, answer), null);
                     }
                     else if (routedMessage.type == "candidate")
                     {
                         CandidateData candidate = new CandidateData
                         {
-                            connectionId = routedMessage.@from,
+                            connectionId = routedMessage.to,
                             candidate = msg.candidate,
                             sdpMLineIndex = msg.sdpMLineIndex,
                             sdpMid = msg.sdpMid

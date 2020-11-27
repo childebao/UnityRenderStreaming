@@ -12,7 +12,7 @@ const clients: Map<WebSocket, Set<string>> = new Map<WebSocket, Set<string>>();
 const connections: Map<string, Set<WebSocket>> = new Map<string, Set<WebSocket>>();
 
 // [{connectionId:[connectionId1, connectionId2]}]
-const connectionPair: Map<string, Set<string>> = new Map<string, Set<string>>();
+const connectionPair: Map<string, [string, string]> = new Map<string, [string, string]>();
 
 // [{connectionId:[{connectionId:Candidate},...]}]
 const candidates: Map<string, Map<string, Candidate[]>> = new Map<string, Map<string, Candidate[]>>();
@@ -113,7 +113,7 @@ export default class WSSignaling {
         const to = message.to as string;
         const newOffer = new Offer(message.data.sdp, Date.now());
 
-        connectionPair.set(from, new Set<string>());
+        connectionPair.set(message.data.connectionId, [from, null]);
 
         if (this.isPrivate) {
             const sessionIds = connections.get(to);
@@ -131,11 +131,12 @@ export default class WSSignaling {
     private onAnswer(ws: WebSocket, message: any) {
         const from = message.from as string;
         const to = message.to as string;
-        connectionPair[to].set(from);
+        const connectionId = message.data.connectionId;
+        connectionPair.set(connectionId, [to, from]);
 
         const mapCandidates = candidates.get(to);
         if (mapCandidates) {
-            const arrayCandidates = mapCandidates.get(to);
+            const arrayCandidates = mapCandidates.get(connectionId);
             for (const candidate of arrayCandidates) {
                 candidate.datetime = Date.now();
             }
@@ -151,20 +152,32 @@ export default class WSSignaling {
     private onCandidate(ws: WebSocket, message: any) {
         const from = message.from;
         const to = message.to;
-        if (!candidates.has(from)) {
-            candidates.set(from, new Map<string, Candidate[]>());
+        const connectionId = message.data.connectionId;
+
+        if (!candidates.has(connectionId)) {
+            candidates.set(connectionId, new Map<string, Candidate[]>());
         }
-        const map = candidates.get(from);
-        if (!map.has(to)) {
-            map.set(to, []);
+        const map = candidates.get(connectionId);
+        if (!map.has(from)) {
+            map.set(from, []);
         }
-        const arr = map.get(to);
-        const candidate = new Candidate(message.candidate, message.sdpMLineIndex, message.sdpMid, Date.now());
+        const arr = map.get(from);
+
+        const data = message.data;
+        const candidate = new Candidate(data.candidate, data.sdpMLineIndex, data.sdpMid, Date.now());
         arr.push(candidate);
 
         const sessionIds = connections.get(to);
-        sessionIds.forEach(session => {
-            session.send(JSON.stringify({ from: from, to: to, type: "candidate", data: candidate }));
-        });
+
+        // const sendArr = candidates.get(connectionId);
+        // const pair = connectionPair.get(connectionId);
+        // const a = from === pair[0] ? pair[1] : pair[0];
+        // const array = sendArr.get(a).filter(v => v.datetime > Date.now()).map(v => new Candidate(data.candidate, data.sdpMLineIndex, data.sdpMid, Date.now()));
+
+        if(sessionIds){
+            sessionIds.forEach(session => {
+                session.send(JSON.stringify({ from: from, to: to, type: "candidate", data: candidate }));
+            });    
+        }
     }
 }

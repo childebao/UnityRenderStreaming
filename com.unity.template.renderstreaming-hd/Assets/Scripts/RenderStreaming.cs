@@ -65,7 +65,6 @@ namespace Unity.RenderStreaming
         private MediaStream m_audioStream;
         private DefaultInput m_defaultInput;
         private RTCConfiguration m_conf;
-        private string m_connectionId;
 
         public static RenderStreaming Instance { get; private set; }
 
@@ -109,12 +108,8 @@ namespace Unity.RenderStreaming
                 Type t = Type.GetType(signalingType);
                 object[] args = { urlSignaling, interval, m_mainThreadContext };
                 this.m_signaling = (ISignaling)Activator.CreateInstance(t, args);
-                this.m_signaling.OnStart += signaling => signaling.CreateConnection();
-                this.m_signaling.OnCreateConnection += (signaling, id) =>
-                {
-                    m_connectionId = id;
-                    CreatePeerConnection(signaling, m_connectionId, true);
-                };
+                this.m_signaling.OnStart += signaling => signaling.CreateConnection(Guid.NewGuid().ToString());
+                this.m_signaling.OnCreateConnection += (signaling, id) => CreatePeerConnection(signaling, id, true);
                 this.m_signaling.OnOffer += (signaling, data) => StartCoroutine(OnOffer(signaling, data));
                 this.m_signaling.OnAnswer += (signaling, data) => StartCoroutine(OnAnswer(signaling, data));
                 this.m_signaling.OnIceCandidate += OnIceCandidate;
@@ -155,13 +150,13 @@ namespace Unity.RenderStreaming
 
         public void AddTransceiver()
         {
-            if (string.IsNullOrEmpty(m_connectionId) ||
-                !m_mapConnectionIdAndPeer.TryGetValue(m_connectionId, out var pc))
-            {
-                return;
-            }
+            // if (string.IsNullOrEmpty(m_connectionId) ||
+            //     !m_mapConnectionIdAndPeer.TryGetValue(m_connectionId, out var pc))
+            // {
+            //     return;
+            // }
 
-            RTCRtpTransceiver transceiver = pc.AddTransceiver(TrackKind.Video);
+            // RTCRtpTransceiver transceiver = pc.AddTransceiver(TrackKind.Video);
             // ToDO: need webrtc package version 2.3
             // transceiver.Direction = RTCRtpTransceiverDirection.RecvOnly;
         }
@@ -344,7 +339,7 @@ namespace Unity.RenderStreaming
 
             if (pc.SignalingState != RTCSignalingState.Stable)
             {
-                Debug.LogError($"peerConnection's signaling state is not stable.");
+                Debug.LogError($"peerConnection's signaling state is not stable. state is {pc.SignalingState}");
                 yield break;
             }
 
